@@ -7,9 +7,9 @@
 #### Original MLCPP
 + TSP, not considering collision nor smoothness of paths
 <p align="center">
-  <img src="resource/fixed_mlcpp.png" height="400"/>
-  <img src="resource/fixed_mlcpp2.png" height="400"/>
-  <img src="resource/mlcpp_collision.png" height="350"/>
+  <img src="resource/fixed_mlcpp.png" height="300"/>
+  <img src="resource/fixed_mlcpp2.png" height="300"/>
+  <img src="resource/mlcpp_collision.png" height="300"/>
   <br>
   <em>Original MLCPP. (left): Target and path. (center): full visualization. (right): collisions of path</em>
 </p>

@@ -23,6 +23,8 @@
 
 ///// ROS
 #include <ros/ros.h>
+#include <tf/LinearMath/Quaternion.h> // to Quaternion_to_euler
+#include <tf/LinearMath/Matrix3x3.h> // to Quaternion_to_euler
 #include <std_msgs/Empty.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/CameraInfo.h>
@@ -30,6 +32,7 @@
 #include <geometry_msgs/PoseArray.h>
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/Point.h>
 #include <nav_msgs/Path.h>
 #include <image_transport/image_transport.h>
 #include <image_geometry/pinhole_camera_model.h>
@@ -73,6 +76,7 @@ class ceo_mlcpp_class{
     double m_view_pt_each_dist = 2.0; //between each viewpoints
     double m_view_overlap = 0.1; //overlap bet two viewpoints
     double m_slice_height = 8.0;
+    double m_max_velocity = 1.0;
     ///// MLCPP variables
     image_geometry::PinholeCameraModel m_camera_model;
     pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::Normal> m_normal_estimator;
@@ -107,6 +111,8 @@ class ceo_mlcpp_class{
     double PclArrayCost(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray);
     double TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray);
     void OrdreringTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray);
+    // traj refine
+    void traj_refinement(nav_msgs::Path &path_in);
 
     //constructor
     ceo_mlcpp_class(const ros::NodeHandle& n);
@@ -134,6 +140,7 @@ ceo_mlcpp_class::ceo_mlcpp_class(const ros::NodeHandle& n) : m_nh(n){
   m_nh.param("/view_pt_dist", m_view_pt_dist, 10.0);
   m_nh.param("/view_pt_each_dist", m_view_pt_each_dist, 2.0);
   m_nh.param("/view_overlap", m_view_overlap, 0.1);
+  m_nh.param("/max_velocity", m_max_velocity, 1.0);
 
   //sub
   m_path_calc_sub = m_nh.subscribe<std_msgs::Empty>("/calculate_cpp", 3, &ceo_mlcpp_class::calc_cb, this);
@@ -447,6 +454,10 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
       pass.filter (*Sliced_ptnorm);
       current_layer++;
     } //while end
+
+    //// traj refinement
+    traj_refinement(m_all_layer_path);
+
 	} //if end
 	else{
 		ROS_WARN("One of cam info / PCD file loading / PCD pre-process has not been done yet");
@@ -627,6 +638,64 @@ void ceo_mlcpp_class::OrdreringTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarr
     }
   }
   pcl::copyPointCloud(temp_Array,*pclarray);
+}
+
+
+
+void ceo_mlcpp_class::traj_refinement(nav_msgs::Path &path_in){
+  nav_msgs::Path path = path_in;
+  path_in.poses.clear();
+
+  Eigen::MatrixXd A_ = Eigen::MatrixXd::Zero(8,8);
+  for (int i = 0; i < path.poses.size()-1; ++i)
+  {
+    geometry_msgs::Point curr, next;
+    Eigen::VectorXd x_coeff(8), y_coeff(8), z_coeff(8), b_x_(8), b_y_(8), b_z_(8);
+
+    curr = path.poses[i].pose.position;
+    next = path.poses[i+1].pose.position;
+    tf::Quaternion curr_q(path.poses[i].pose.orientation.x, path.poses[i].pose.orientation.y, path.poses[i].pose.orientation.z, path.poses[i].pose.orientation.w);
+    tf::Quaternion next_q(path.poses[i+1].pose.orientation.x, path.poses[i+1].pose.orientation.y, path.poses[i+1].pose.orientation.z, path.poses[i+1].pose.orientation.w);
+    tf::Matrix3x3 curr_m(curr_q);
+    tf::Matrix3x3 next_m(next_q);
+    double _a, _b, curr_yaw, next_yaw;
+    curr_m.getRPY(_a, _b, curr_yaw);
+    next_m.getRPY(_a, _b, next_yaw);
+
+    double T_ = 1.1 * sqrt(pow(next.x-curr.x, 2) + pow(next.y-curr.y, 2) + pow(next.z-curr.z, 2)) / m_max_velocity;
+
+    A_ << 0, 0, 0, 0, 0, 0, 0, 1,
+    pow(T_,7), pow(T_,6), pow(T_,5), pow(T_,4), pow(T_,3), pow(T_,2), T_, 1,
+    0, 0, 0, 0, 0, 0, 1, 0,
+    7*pow(T_,6), 6*pow(T_,5), 5*pow(T_,4), 4*pow(T_,3), 3*pow(T_,2), 2*T_, 1, 0,
+    0, 0, 0, 0, 0, 2, 0, 0,
+    42*pow(T_,5), 30*pow(T_,4), 20*pow(T_,3), 12*pow(T_,2), 6*T_, 2, 0, 0,
+    0, 0, 0, 0, 6, 0, 0, 0,
+    210*pow(T_,4), 120*pow(T_,3), 60*pow(T_,2), 24*T_, 6, 0, 0, 0;    
+
+    b_x_ << curr.x, next.x, 0, 0, 0, 0, 0, 0;
+    b_y_ << curr.y, next.y, 0, 0, 0, 0, 0, 0;
+    b_z_ << curr.z, next.z, 0, 0, 0, 0, 0, 0;
+    x_coeff = A_.lu().solve(b_x_);  y_coeff = A_.lu().solve(b_y_);  z_coeff = A_.lu().solve(b_z_);
+
+    for (double t = T_*0.2; t <= T_; t+=T_*0.2)
+    {
+      geometry_msgs::PoseStamped p;
+      p.pose.position.x = x_coeff[0]*pow(t,7) + x_coeff[1]*pow(t,6) + x_coeff[2]*pow(t,5) + x_coeff[3]*pow(t,4) + x_coeff[4]*pow(t,3) + x_coeff[5]*pow(t,2) + x_coeff[6]*t + x_coeff[7];
+      p.pose.position.y = y_coeff[0]*pow(t,7) + y_coeff[1]*pow(t,6) + y_coeff[2]*pow(t,5) + y_coeff[3]*pow(t,4) + y_coeff[4]*pow(t,3) + y_coeff[5]*pow(t,2) + y_coeff[6]*t + y_coeff[7];
+      p.pose.position.z = z_coeff[0]*pow(t,7) + z_coeff[1]*pow(t,6) + z_coeff[2]*pow(t,5) + z_coeff[3]*pow(t,4) + z_coeff[4]*pow(t,3) + z_coeff[5]*pow(t,2) + z_coeff[6]*t + z_coeff[7];
+
+      double g_yaw = curr_yaw + (next_yaw-curr_yaw) * t/T_;
+      tf::Quaternion qqq;
+      qqq.setRPY(0,0, g_yaw); //roll=pitch=0 !!!
+
+      p.pose.orientation.x = qqq.getX();
+      p.pose.orientation.y = qqq.getY();
+      p.pose.orientation.z = qqq.getZ();
+      p.pose.orientation.w = qqq.getW();
+      path_in.poses.push_back(p);
+    }
+  }
 }
 
 
