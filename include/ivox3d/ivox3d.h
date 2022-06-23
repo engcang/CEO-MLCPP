@@ -52,7 +52,7 @@ namespace ivoxel {
         };
 
         struct Options {
-            float resolution_ = 0.3;                        // ivox resolution
+            float resolution_ = 0.25;                        // ivox resolution
             float inv_resolution_ = 10.0;                   // inverse resolution
             NearbyType nearby_type_ = NearbyType::NEARBY18;  // nearby range
             std::size_t capacity_ = 1000000;                // capacity

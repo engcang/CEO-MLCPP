@@ -20,15 +20,15 @@
 ## How to install
 + Install requirements
 ```bash
-$ sudo apt install libgoogle-glog-dev libeigen3-dev
+sudo apt install libgoogle-glog-dev libeigen3-dev
 ```
 + Install `gcc-9` and `g++-9`
 ```bash
-$ sudo apt-get install libgoogle-glog-dev
-$ sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-$ sudo apt update
-$ sudo apt install gcc-9 g++-9
-$ sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9
+sudo apt-get install libgoogle-glog-dev
+sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+sudo apt update
+sudo apt install gcc-9 g++-9
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9
 ```
 
 + Build this Repo

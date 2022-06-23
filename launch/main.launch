@@ -15,11 +15,12 @@
   <!-- CEO-MLCPP params -->
   <param name="/slice_height" value="8.0"/> <!-- slicing target PCL every this meters -->
   <param name="/max_dist" value="15.0"/> <!-- between viewpoint and target pcl point -->
-  <param name="/max_angle" value="60.0"/> <!-- between viewpoint and target pcl point's normal -->
+  <param name="/max_angle" value="40.0"/> <!-- between viewpoint and target pcl point's normal -->
   <param name="/view_pt_dist" value="10.0"/> <!-- from points -->
-  <param name="/view_pt_each_dist" value="2.0"/> <!-- between each viewpoints -->
-  <param name="/view_overlap" value="0.1"/> <!-- overlap bet two viewpoints -->
+  <param name="/view_pt_each_dist" value="1.0"/> <!-- between each viewpoints -->
+  <param name="/view_overlap" value="0.25"/> <!-- overlap bet two viewpoints -->
   <param name="/max_velocity" value="1.0"/> <!-- max velocity of UAV -->
+  <param name="/collision_radius" value="3.0"/> <!-- max velocity of UAV -->
 
   <!-- main node  -->
   <node name="ceo_mlcpp_node" pkg="ceo_mlcpp" type="ceo_mlcpp_node" output="screen"/>
