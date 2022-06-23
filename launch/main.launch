@@ -13,14 +13,14 @@
   <rosparam param="/cam_intrinsic">[640, 480, 319.998, 319.998, 320.5, 240.5]</rosparam> <!-- width, height, f_x, f_y, c_x, c_y -->
 
   <!-- CEO-MLCPP params -->
-  <param name="/slice_height" value="8.0"/> <!-- slicing target PCL every this meters -->
+  <param name="/slice_height" value="16.0"/> <!-- slicing target PCL every this meters -->
   <param name="/max_dist" value="15.0"/> <!-- between viewpoint and target pcl point -->
   <param name="/max_angle" value="40.0"/> <!-- between viewpoint and target pcl point's normal -->
   <param name="/view_pt_dist" value="10.0"/> <!-- from points -->
   <param name="/view_pt_each_dist" value="1.0"/> <!-- between each viewpoints -->
-  <param name="/view_overlap" value="0.25"/> <!-- overlap bet two viewpoints -->
+  <param name="/view_overlap" value="0.3"/> <!-- overlap bet two viewpoints -->
   <param name="/max_velocity" value="1.0"/> <!-- max velocity of UAV -->
-  <param name="/collision_radius" value="3.0"/> <!-- max velocity of UAV -->
+  <param name="/collision_radius" value="5.0"/> <!-- max velocity of UAV -->
 
   <!-- main node  -->
   <node name="ceo_mlcpp_node" pkg="ceo_mlcpp" type="ceo_mlcpp_node" output="screen"/>
