@@ -3,7 +3,7 @@
 
 
 #include "utilities.h"
-#include "ivox3d.h"
+#include "ikd_Tree.h"
 
 ///// C++
 #include <algorithm>
@@ -24,6 +24,7 @@
 
 ///// ROS
 #include <ros/ros.h>
+#include <tf_conversions/tf_eigen.h> // to Quaternion_to_euler
 #include <tf/LinearMath/Quaternion.h> // to Quaternion_to_euler
 #include <tf/LinearMath/Matrix3x3.h> // to Quaternion_to_euler
 #include <std_msgs/Empty.h>
@@ -35,8 +36,6 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Point.h>
 #include <nav_msgs/Path.h>
-#include <image_transport/image_transport.h>
-#include <image_geometry/pinhole_camera_model.h>
 
 ///// PCL
 //defaults
@@ -58,10 +57,8 @@
 
 
 using namespace std;
-using namespace ivoxel;
 using PointType = pcl::PointXYZ;
-using IVoxType = IVox<3, IVoxNodeType::DEFAULT, PointType>;
-using PointVectorIVox = vector<PointType, Eigen::aligned_allocator<PointType>>;
+using PointVectorIKdTree = KD_TREE<PointType>::PointVector;
 
 
 //// main class
@@ -71,7 +68,8 @@ class ceo_mlcpp_class{
     bool m_pcd_load=false, m_pre_process=false, m_traj_refined_check=false;
     bool m_debug_mode=false;
     string m_infile;
-    vector<double> m_cam_intrinsic;
+    vector<double> m_cam_intrinsic, m_cam_extrinsic;
+    Eigen::Matrix4d m_body_t_cam = Eigen::Matrix4d::Identity();
 
     ///// MLCPP params
     double m_max_dist = 15.0;
@@ -80,6 +78,7 @@ class ceo_mlcpp_class{
     double m_view_pt_each_dist = 2.0; //between each viewpoints
     double m_view_overlap = 0.1; //overlap bet two viewpoints
     double m_slice_height = 8.0;
+    int m_TSP_trial = 100;
     ///// CEO-MLCPP params
     double m_max_velocity = 1.0;
     double m_collision_radius = 1.0;
@@ -92,9 +91,9 @@ class ceo_mlcpp_class{
     geometry_msgs::PoseArray m_normal_pose_array;
     nav_msgs::Path m_all_layer_path, m_all_layer_refined_path;
 
-    ///// iVox
-    IVoxType::Options m_ivox_options_;
-    shared_ptr<IVoxType> m_iVox = nullptr;
+    ///// ikd-Tree
+    shared_ptr<KD_TREE<PointType>> m_ikd_Tree = nullptr;
+    double m_ikdtree_delete_param, m_ikdtree_balance_param;
 
     ///// ROS
     ros::NodeHandle m_nh;
@@ -105,20 +104,18 @@ class ceo_mlcpp_class{
     ros::Timer m_visualizing_timer;
 
     ///// Functions    
-    //ROS
+    // ROS
     void calc_cb(const std_msgs::Empty::ConstPtr& msg);
     void visualizer_timer_func(const ros::TimerEvent& event);
-    //init
+    // init
     void load_pcd();
     void preprocess_pcd();
-    //others
+    // funcs
     bool check_cam_in(Eigen::VectorXd view_point_xyzpy,pcl::PointXYZ point,pcl::Normal normal);
     void flip_normal(pcl::PointXYZ base,pcl::PointXYZ center,float & nx,float & ny, float & nz);
-    Eigen::Matrix3d RPYtoR(double roll, double pitch, double yaw);
     void TwoOptSwap(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray, int start, int finish);
     double PclArrayCost(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray, double &distance);
     double TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray);
-    void OrdreringTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray);
     // traj refine
     void traj_refinement(const nav_msgs::Path &path_in);
     // collision
@@ -144,14 +141,19 @@ ceo_mlcpp_class::ceo_mlcpp_class(const ros::NodeHandle& n) : m_nh(n){
   m_nh.param<string>("/infile", m_infile, "resource/1875935000.pcd");
   m_nh.param<bool>("/debug_mode", m_debug_mode, false);
   m_nh.getParam("/cam_intrinsic", m_cam_intrinsic);
+  m_nh.getParam("/cam_extrinsic", m_cam_extrinsic);
   m_nh.param("/slice_height", m_slice_height, 8.0);
   m_nh.param("/max_dist", m_max_dist, 15.0);
   m_nh.param("/max_angle", m_max_angle, 60.0);
   m_nh.param("/view_pt_dist", m_view_pt_dist, 10.0);
   m_nh.param("/view_pt_each_dist", m_view_pt_each_dist, 2.0);
   m_nh.param("/view_overlap", m_view_overlap, 0.1);
+  m_nh.param("/TSP_trial", m_TSP_trial, 100);
   m_nh.param("/max_velocity", m_max_velocity, 1.0);
-  m_nh.param("/collision_radius", m_collision_radius, 1.0);
+  m_nh.param("/collision_radius", m_collision_radius, 10.0);
+
+  m_body_t_cam.block<3, 3>(0, 0) = Eigen::Quaterniond(-0.5, 0.5, -0.5, 0.5).toRotationMatrix(); //TODO
+  m_body_t_cam.block<3, 1>(0, 3) = Eigen::Vector3d(m_cam_extrinsic[0], m_cam_extrinsic[1], m_cam_extrinsic[2]);
 
   //sub
   m_path_calc_sub = m_nh.subscribe<std_msgs::Empty>("/calculate_cpp", 3, &ceo_mlcpp_class::calc_cb, this);
@@ -166,8 +168,8 @@ ceo_mlcpp_class::ceo_mlcpp_class(const ros::NodeHandle& n) : m_nh(n){
   m_all_layer_path_pub = m_nh.advertise<nav_msgs::Path>("/ceo_mlcpp_path", 3);
   m_all_layer_path_refined_pub = m_nh.advertise<nav_msgs::Path>("/ceo_mlcpp_refined_path", 3);
 
-  //iVox
-  m_iVox = make_shared<IVoxType>(m_ivox_options_);
+  //ikdtree
+  m_ikd_Tree = make_shared<KD_TREE<PointType>>();
 
   //timer
   m_visualizing_timer = m_nh.createTimer(ros::Duration(1/5.0), &ceo_mlcpp_class::visualizer_timer_func, this);
@@ -207,7 +209,6 @@ void ceo_mlcpp_class::preprocess_pcd(){
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
   ////// Ground Eleminate
   ROS_INFO("Ground filtering Start!");
-  //#pragma omp parallel for
   m_pcd_center_point.x = 0; m_pcd_center_point.y = 0; m_pcd_center_point.z = 0;
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_map_nogr(new pcl::PointCloud<pcl::PointXYZ>);
   for(size_t i = 0; i < m_cloud_map.points.size() ; ++i){
@@ -271,14 +272,14 @@ void ceo_mlcpp_class::preprocess_pcd(){
   m_normal_pose_array.header.frame_id = "map";
 
 
-  ///// ivox for collision
-  PointVectorIVox pcl_input_point_vector_ivox;
+  ///// ikd-Tree for collision
+  PointVectorIKdTree pcl_input_map_point_vector_ikd;
   for (int i = 0; i < m_cloud_map.size(); ++i)
   {
-    pcl_input_point_vector_ivox.push_back(m_cloud_map.points[i]);
+    pcl_input_map_point_vector_ikd.push_back(m_cloud_map.points[i]);
   }
-  m_iVox->AddPoints(pcl_input_point_vector_ivox);
-  ROS_INFO("iVox updated");
+  m_ikd_Tree->Build(pcl_input_map_point_vector_ikd);
+  ROS_INFO("ikd-Tree updated");
 
 
   std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
@@ -309,14 +310,14 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
     pcl::getMinMax3D(m_cloud_normals, minpt, maxpt);
     float minpt_z = minpt.z;
     ///PCL Slice with Z axis value (INITIAL)
-    pcl::PointCloud<pcl::PointNormal>::Ptr Sliced_ptnorm(new pcl::PointCloud<pcl::PointNormal>);
-    pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pt_normals(new pcl::PointCloud<pcl::PointNormal>);
-    *cloud_pt_normals = m_cloud_normals;
+    pcl::PointCloud<pcl::PointNormal>::Ptr Sliced_target_points_normals_all(new pcl::PointCloud<pcl::PointNormal>);
+    pcl::PointCloud<pcl::PointNormal>::Ptr all_points_normals_temporal(new pcl::PointCloud<pcl::PointNormal>);
+    *all_points_normals_temporal = m_cloud_normals;
     pcl::PassThrough<pcl::PointNormal> pass;
-    pass.setInputCloud (cloud_pt_normals);
+    pass.setInputCloud (all_points_normals_temporal);
     pass.setFilterFieldName ("z");
     pass.setFilterLimits (minpt_z,minpt_z+m_slice_height);
-    pass.filter (*Sliced_ptnorm);
+    pass.filter (*Sliced_target_points_normals_all);
 
     while(!finish)
     {
@@ -324,85 +325,81 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
         finish = true;
       }
       ///PCL make viewpoints by points and normals
-      pcl::PointCloud<pcl::PointNormal>::Ptr viewpoint_ptnorm(new pcl::PointCloud<pcl::PointNormal>);
-      viewpoint_ptnorm->clear();
-      for(int i=0;i<Sliced_ptnorm->points.size();i++)
+      pcl::PointCloud<pcl::PointNormal>::Ptr viewpoint_ptnorm_temporal(new pcl::PointCloud<pcl::PointNormal>);
+      viewpoint_ptnorm_temporal->clear();
+      for(int i=0;i<Sliced_target_points_normals_all->points.size();i++)
       {
         pcl::PointNormal temp_ptnorm;
-        temp_ptnorm.x = Sliced_ptnorm->points[i].x + Sliced_ptnorm->points[i].normal[0] * m_view_pt_dist;
-        temp_ptnorm.y = Sliced_ptnorm->points[i].y + Sliced_ptnorm->points[i].normal[1] * m_view_pt_dist;
-        temp_ptnorm.z = Sliced_ptnorm->points[i].z + Sliced_ptnorm->points[i].normal[2] * m_view_pt_dist;
+        temp_ptnorm.x = Sliced_target_points_normals_all->points[i].x + Sliced_target_points_normals_all->points[i].normal[0] * m_view_pt_dist;
+        temp_ptnorm.y = Sliced_target_points_normals_all->points[i].y + Sliced_target_points_normals_all->points[i].normal[1] * m_view_pt_dist;
+        temp_ptnorm.z = Sliced_target_points_normals_all->points[i].z + Sliced_target_points_normals_all->points[i].normal[2] * m_view_pt_dist;
         if(temp_ptnorm.z <= 0 ) continue;
         ///// Path's viewpoint direction should be opposite to normal
-        temp_ptnorm.normal[0] = -Sliced_ptnorm->points[i].normal[0];
-        temp_ptnorm.normal[1] = -Sliced_ptnorm->points[i].normal[1];
-        temp_ptnorm.normal[2] = -Sliced_ptnorm->points[i].normal[2];
-        viewpoint_ptnorm->push_back(temp_ptnorm);
+        temp_ptnorm.normal[0] = -Sliced_target_points_normals_all->points[i].normal[0];
+        temp_ptnorm.normal[1] = -Sliced_target_points_normals_all->points[i].normal[1];
+        temp_ptnorm.normal[2] = -Sliced_target_points_normals_all->points[i].normal[2];
+        viewpoint_ptnorm_temporal->push_back(temp_ptnorm);
       }
       ///PCL downsample viewpoints with VoxelGrid
       pcl::VoxelGrid<pcl::PointNormal> voxgrid;
-      pcl::PointCloud<pcl::PointNormal>::Ptr Voxed_Sliced_Viewpt (new pcl::PointCloud<pcl::PointNormal>);
-      Voxed_Sliced_Viewpt->clear();
-      pcl::PointCloud<pcl::PointNormal>::Ptr Voxed_Sliced_Admitted_Viewpt (new pcl::PointCloud<pcl::PointNormal>);
-      Voxed_Sliced_Admitted_Viewpt->clear();
-      voxgrid.setInputCloud(viewpoint_ptnorm);
-      voxgrid.setLeafSize(m_view_pt_each_dist,m_view_pt_each_dist,m_view_pt_each_dist*0.8);
-      voxgrid.filter(*Voxed_Sliced_Viewpt);
+      pcl::PointCloud<pcl::PointNormal>::Ptr sliced_view_points (new pcl::PointCloud<pcl::PointNormal>);
+      sliced_view_points->clear();
+      pcl::PointCloud<pcl::PointNormal>::Ptr Sliced_admitted_view_points (new pcl::PointCloud<pcl::PointNormal>);
+      Sliced_admitted_view_points->clear();
+      voxgrid.setInputCloud(viewpoint_ptnorm_temporal);
+      voxgrid.setLeafSize(m_view_pt_each_dist,m_view_pt_each_dist,m_view_pt_each_dist);
+      voxgrid.filter(*sliced_view_points);
 
-      ROS_WARN("current layer %d, not viewed, voxelized initial viewpoints: %d", current_layer, Voxed_Sliced_Viewpt->points.size());
-      for (int idx = 0; idx < Voxed_Sliced_Viewpt->points.size(); ++idx)
+      ROS_WARN("current layer %d, not viewed, voxelized initial viewpoints: %d", current_layer, sliced_view_points->points.size());
+      for (int idx = 0; idx < sliced_view_points->points.size(); ++idx)
       {
         pcl::PointXYZ initial_view_pts;
-        initial_view_pts.x = Voxed_Sliced_Viewpt->points[idx].x;
-        initial_view_pts.y = Voxed_Sliced_Viewpt->points[idx].y;
-        initial_view_pts.z = Voxed_Sliced_Viewpt->points[idx].z;
+        initial_view_pts.x = sliced_view_points->points[idx].x;
+        initial_view_pts.y = sliced_view_points->points[idx].y;
+        initial_view_pts.z = sliced_view_points->points[idx].z;
         m_cloud_initial_view_point.push_back(initial_view_pts);
       }
 
-      pcl::PointCloud<pcl::PointNormal>::Ptr Sliced_ptnorm_Unview (new pcl::PointCloud<pcl::PointNormal>);
-      Sliced_ptnorm_Unview->clear();
-      pcl::copyPointCloud(*Sliced_ptnorm,*Sliced_ptnorm_Unview);
+      pcl::PointCloud<pcl::PointNormal>::Ptr Sliced_target_points_normals_nonviewed (new pcl::PointCloud<pcl::PointNormal>);
+      Sliced_target_points_normals_nonviewed->clear();
+      pcl::copyPointCloud(*Sliced_target_points_normals_all,*Sliced_target_points_normals_nonviewed);
       ///PCL downsample viewpoints by view calculation
       int admitted=0;
-      int a[Voxed_Sliced_Viewpt->points.size()];
-      for(int i=0;i<Voxed_Sliced_Viewpt->points.size();i++){
+      int a[sliced_view_points->points.size()];
+      for(int i=0;i<sliced_view_points->points.size();i++){
         a[i]=i;
       }
-      random_shuffle(&a[0], &a[Voxed_Sliced_Viewpt->points.size()]);
-      for(int k=0;k<Voxed_Sliced_Viewpt->points.size();k++)
+      random_shuffle(&a[0], &a[sliced_view_points->points.size()]);
+      for(int k=0;k<sliced_view_points->points.size();k++)
       {
         int i = a[k];
         vector<int> toerase;
         vector<int> view_comp_map;
         Eigen::VectorXd viewpt(5);
-        viewpt << Voxed_Sliced_Viewpt->points[i].x,Voxed_Sliced_Viewpt->points[i].y,Voxed_Sliced_Viewpt->points[i].z,
-                asin(-Voxed_Sliced_Viewpt->points[i].normal[2])/M_PI*180.0,
-                asin(Voxed_Sliced_Viewpt->points[i].normal[1]/cos(-Voxed_Sliced_Viewpt->points[i].normal[2]))/M_PI*180.0;
-#pragma omp parallel for
-        for(int j=0;j<Sliced_ptnorm_Unview->points.size();j++)
+        viewpt << sliced_view_points->points[i].x,sliced_view_points->points[i].y,sliced_view_points->points[i].z,
+                  sliced_view_points->points[i].normal[1], sliced_view_points->points[i].normal[2];
+                
+        for(int j=0;j<Sliced_target_points_normals_nonviewed->points.size();j++)
         {
-          pcl::PointXYZ point_toview(Sliced_ptnorm_Unview->points[j].x,Sliced_ptnorm_Unview->points[j].y,
-                                     Sliced_ptnorm_Unview->points[j].z);
-          pcl::Normal point_normal(Sliced_ptnorm_Unview->points[j].normal[0],
-                                   Sliced_ptnorm_Unview->points[j].normal[1],
-                                   Sliced_ptnorm_Unview->points[j].normal[2]);
+          pcl::PointXYZ point_toview(Sliced_target_points_normals_nonviewed->points[j].x,Sliced_target_points_normals_nonviewed->points[j].y,
+                                     Sliced_target_points_normals_nonviewed->points[j].z);
+          pcl::Normal point_normal(Sliced_target_points_normals_nonviewed->points[j].normal[0],
+                                   Sliced_target_points_normals_nonviewed->points[j].normal[1],
+                                   Sliced_target_points_normals_nonviewed->points[j].normal[2]);
           if(check_cam_in(viewpt,point_toview,point_normal))
           {
-#pragma omp critical
             toerase.push_back(j);
           }
         }
-#pragma omp parallel for
-        for (size_t j=0;j<Sliced_ptnorm->points.size();j++)
+        for (size_t j=0;j<Sliced_target_points_normals_all->points.size();j++)
         {
-          pcl::PointXYZ point_toview(Sliced_ptnorm->points[j].x,Sliced_ptnorm->points[j].y,
-                                     Sliced_ptnorm->points[j].z);
-          pcl::Normal point_normal(Sliced_ptnorm->points[j].normal[0],
-                                   Sliced_ptnorm->points[j].normal[1],
-                                   Sliced_ptnorm->points[j].normal[2]);
+          pcl::PointXYZ point_toview(Sliced_target_points_normals_all->points[j].x,Sliced_target_points_normals_all->points[j].y,
+                                     Sliced_target_points_normals_all->points[j].z);
+          pcl::Normal point_normal(Sliced_target_points_normals_all->points[j].normal[0],
+                                   Sliced_target_points_normals_all->points[j].normal[1],
+                                   Sliced_target_points_normals_all->points[j].normal[2]);
           if(check_cam_in(viewpt,point_toview,point_normal))
           {
-#pragma omp critical
             view_comp_map.push_back(j);
           }
         }
@@ -411,52 +408,83 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
           sort(toerase.begin(),toerase.end());
           for(int j=toerase.size()-1;j>-1;j--)
           {
-            Sliced_ptnorm_Unview->points.erase(Sliced_ptnorm_Unview->points.begin()+toerase[j]);
+            Sliced_target_points_normals_nonviewed->points.erase(Sliced_target_points_normals_nonviewed->points.begin()+toerase[j]);
           }
           if (m_debug_mode){
-            ROS_INFO("%d Point Left", Sliced_ptnorm_Unview->points.size());
-            ROS_INFO("Viewpoint %d / %d Admitted ", i, Voxed_Sliced_Viewpt->points.size());
+            ROS_INFO("%d Point Left", Sliced_target_points_normals_nonviewed->points.size());
+            ROS_INFO("Viewpoint %d / %d Admitted ", i, sliced_view_points->points.size());
           }
           admitted++;
-          Voxed_Sliced_Admitted_Viewpt->push_back(Voxed_Sliced_Viewpt->points[i]);
+          Sliced_admitted_view_points->push_back(sliced_view_points->points[i]);
         }
-        //else cout<<"Viewpoint "<<i<<"/"<<Voxed_Sliced_Viewpt->points.size()<<" Not Admitted"<<endl;
+        //else cout<<"Viewpoint "<<i<<"/"<<sliced_view_points->points.size()<<" Not Admitted"<<endl;
       }
       if (m_debug_mode){
         ROS_INFO("Admitted Viewpoint: %d", admitted);
       }
-      ROS_WARN("current layer %d, still none-viewed points: %d among %d in slice", current_layer, Sliced_ptnorm_Unview->points.size(), Sliced_ptnorm->points.size());
-      for (int idx = 0; idx < Sliced_ptnorm_Unview->points.size(); ++idx)
-      {
-        pcl::PointXYZ none_view_pcl;
-        none_view_pcl.x = Sliced_ptnorm_Unview->points[idx].x;
-        none_view_pcl.y = Sliced_ptnorm_Unview->points[idx].y;
-        none_view_pcl.z = Sliced_ptnorm_Unview->points[idx].z;
-        m_cloud_none_viewed.push_back(none_view_pcl);
-      }
-
+      
       /// Solve TSP among downsampled viewpoints
-      OrdreringTSP(Voxed_Sliced_Admitted_Viewpt);
-      double best_distance = TwoOptTSP(Voxed_Sliced_Admitted_Viewpt);
+      double best_distance = TwoOptTSP(Sliced_admitted_view_points);
       if (best_distance < 0){
+        ROS_INFO("collision, doing this layer again");
         continue; // collision, do this slice again
       }
-      for(int idx=0; idx<Voxed_Sliced_Admitted_Viewpt->points.size(); ++idx)
-      {
-        pcl::PointXYZ optimized_viewpt;
-        optimized_viewpt.x = Voxed_Sliced_Admitted_Viewpt->points[idx].x;
-        optimized_viewpt.y = Voxed_Sliced_Admitted_Viewpt->points[idx].y;
-        optimized_viewpt.z = Voxed_Sliced_Admitted_Viewpt->points[idx].z;
-        m_optimized_view_point.push_back(optimized_viewpt);
-        m_all_layer_path.poses.push_back(single_pclnormal_to_posestamped(Voxed_Sliced_Admitted_Viewpt->points[idx]));
+      if (current_layer > 1){
+        Eigen::Vector3d last_layer_end_point(m_all_layer_path.poses.back().pose.position.x, m_all_layer_path.poses.back().pose.position.y, m_all_layer_path.poses.back().pose.position.z);
+        Eigen::Vector3d current_first_point(Sliced_admitted_view_points->points[0].x, Sliced_admitted_view_points->points[0].y, Sliced_admitted_view_points->points[0].z);
+        Eigen::Vector3d current_end_point(Sliced_admitted_view_points->points[Sliced_admitted_view_points->points.size()-1].x, Sliced_admitted_view_points->points[Sliced_admitted_view_points->points.size()-1].y, Sliced_admitted_view_points->points[Sliced_admitted_view_points->points.size()-1].z);
+        if (!collision_line(last_layer_end_point, current_first_point, m_collision_radius)){
+          for(int idx=0; idx<Sliced_admitted_view_points->points.size(); ++idx){
+            pcl::PointXYZ optimized_viewpt;
+            optimized_viewpt.x = Sliced_admitted_view_points->points[idx].x;
+            optimized_viewpt.y = Sliced_admitted_view_points->points[idx].y;
+            optimized_viewpt.z = Sliced_admitted_view_points->points[idx].z;
+            m_optimized_view_point.push_back(optimized_viewpt);
+            m_all_layer_path.poses.push_back(single_pclnormal_to_posestamped(Sliced_admitted_view_points->points[idx]));
+          }
+        }
+        else if(!collision_line(last_layer_end_point, current_end_point, m_collision_radius)){
+          for(int idx=Sliced_admitted_view_points->points.size()-1; idx>=0; --idx){
+            pcl::PointXYZ optimized_viewpt;
+            optimized_viewpt.x = Sliced_admitted_view_points->points[idx].x;
+            optimized_viewpt.y = Sliced_admitted_view_points->points[idx].y;
+            optimized_viewpt.z = Sliced_admitted_view_points->points[idx].z;
+            m_optimized_view_point.push_back(optimized_viewpt);
+            m_all_layer_path.poses.push_back(single_pclnormal_to_posestamped(Sliced_admitted_view_points->points[idx]));
+          }
+        }
+        else{
+          ROS_INFO("collision while connecting layers, doing this layer again");
+          continue;
+        }
       }
-      ROS_WARN("current layer %d, TSP %d points, leng: %.2f m", current_layer, Voxed_Sliced_Admitted_Viewpt->points.size(), best_distance);
+      else{ // first layer
+        for(int idx=0; idx<Sliced_admitted_view_points->points.size(); ++idx)
+        {
+          pcl::PointXYZ optimized_viewpt;
+          optimized_viewpt.x = Sliced_admitted_view_points->points[idx].x;
+          optimized_viewpt.y = Sliced_admitted_view_points->points[idx].y;
+          optimized_viewpt.z = Sliced_admitted_view_points->points[idx].z;
+          m_optimized_view_point.push_back(optimized_viewpt);
+          m_all_layer_path.poses.push_back(single_pclnormal_to_posestamped(Sliced_admitted_view_points->points[idx]));
+        }
+      }
+      ROS_WARN("current layer %d, still none-viewed points: %d among %d in slice", current_layer, Sliced_target_points_normals_nonviewed->points.size(), Sliced_target_points_normals_all->points.size());
+      for (int idx = 0; idx < Sliced_target_points_normals_nonviewed->points.size(); ++idx)
+      {
+        pcl::PointXYZ none_view_pcl;
+        none_view_pcl.x = Sliced_target_points_normals_nonviewed->points[idx].x;
+        none_view_pcl.y = Sliced_target_points_normals_nonviewed->points[idx].y;
+        none_view_pcl.z = Sliced_target_points_normals_nonviewed->points[idx].z;
+        m_cloud_none_viewed.push_back(none_view_pcl);
+      }
+      ROS_WARN("current layer %d, TSP %d points, leng: %.2f m", current_layer, Sliced_admitted_view_points->points.size(), best_distance);
       
       ///PCL Slice with Z axis value (untill maxpt.z)
       minpt_z += m_slice_height;
       pass.setFilterFieldName ("z");
       pass.setFilterLimits (minpt_z,minpt_z+m_slice_height);
-      pass.filter (*Sliced_ptnorm);
+      pass.filter (*Sliced_target_points_normals_all);
       current_layer++;
     } //while end
 
@@ -476,7 +504,7 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
 void ceo_mlcpp_class::visualizer_timer_func(const ros::TimerEvent& event){
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 	if (m_pcd_load && m_pre_process){
-		m_cloud_map_pub.publish(cloud2msg(m_cloud_map));
+    m_cloud_map_pub.publish(cloud2msg(m_cloud_map));
     m_cloud_center_pub.publish(cloud2msg(m_cloud_center));
     m_cloud_normal_pub.publish(m_normal_pose_array);
     m_initial_view_point_pub.publish(cloud2msg(m_cloud_initial_view_point));
@@ -504,13 +532,16 @@ bool ceo_mlcpp_class::collision_line(const Eigen::Vector3d &p1, const Eigen::Vec
   Eigen::Vector3d direction = (p2 - p1).normalized();
   double length = (p2 - p1).norm();
 
-  int check_step = int(length / collision_radius);
+  int check_step = int(3.0 * length / collision_radius);
+  // cout << p1.transpose() << " goal: " << p2.transpose() << " len: " << length << " step: " << check_step << endl;
 
   for (int i = 1; i <= check_step; ++i)
   {
-    Eigen::Vector3d search_vec = p1 + direction * length * (double)(i / 10.0);
+    Eigen::Vector3d search_vec = p1 + direction * length * ((double)i / (double)check_step);
     PointType search_pt{search_vec(0), search_vec(1), search_vec(2)};
-    if (m_iVox->IfPointInRadius(search_pt, collision_radius)){ //if any pt within collision_radius, collision
+    PointVectorIKdTree Storage;
+    m_ikd_Tree->Radius_Search(search_pt, collision_radius, Storage);
+    if (Storage.size()>0){
       return true;
     }
   }
@@ -531,46 +562,52 @@ void ceo_mlcpp_class::flip_normal(pcl::PointXYZ base, pcl::PointXYZ center, floa
 
 bool ceo_mlcpp_class::check_cam_in(Eigen::VectorXd view_point_xyzpy,pcl::PointXYZ point,pcl::Normal normal)
 {
-  Eigen::Vector3d pt_bef_rot(point.x-view_point_xyzpy(0),point.y-view_point_xyzpy(1),point.z-view_point_xyzpy(2));
-  Eigen::Vector3d pt_aft_rot = RPYtoR(0,-view_point_xyzpy(3),-view_point_xyzpy(4))*pt_bef_rot;
-  Eigen::Vector4d pt_cvv(pt_aft_rot(0),pt_aft_rot(1),pt_aft_rot(2),1);
-  Eigen::Matrix4d view_pt;
-  view_pt.setIdentity();
-  view_pt.block<3,3>(0,0) = RPYtoR(-90,0,-90);
-  Eigen::Vector4d new_pt = view_pt.inverse() * pt_cvv;
-  cv::Point2d uv;
-  uv.x = m_cam_intrinsic[2]*new_pt(0)/new_pt(2) + m_cam_intrinsic[4];
-  uv.y = m_cam_intrinsic[3]*new_pt(1)/new_pt(2) + m_cam_intrinsic[5];
-  uv.x = floor(abs(uv.x)) * ((uv.x > 0) - (uv.x < 0));
-  uv.y = floor(abs(uv.y)) * ((uv.y > 0) - (uv.y < 0));
-  if(uv.x<0 || uv.x>m_cam_intrinsic[0] || uv.y<0 || uv.y>m_cam_intrinsic[1]) return false;
-  float dist = sqrt(pow((view_point_xyzpy(0)-point.x),2)+pow((view_point_xyzpy(1)-point.y),2)+
-                    pow((view_point_xyzpy(2)-point.z),2));
-  if(dist>m_max_dist) return false;
+  /// if too far
+  float dist = sqrt(pow((view_point_xyzpy(0)-point.x),2)+pow((view_point_xyzpy(1)-point.y),2)+pow((view_point_xyzpy(2)-point.z),2));
+  if (dist > m_max_dist){
+    return false;
+  }
+
   Eigen::Vector3d normal_pt(normal.normal_x,normal.normal_y,normal.normal_z);
-  Eigen::Vector3d Normal_view_pt((view_point_xyzpy(0)-point.x)/dist,(view_point_xyzpy(1)-point.y)/dist,
-                                    (view_point_xyzpy(2)-point.z)/dist);
-  double inner_product = Normal_view_pt.dot(normal_pt);
+  Eigen::Vector3d Normal_view_pt((view_point_xyzpy(0)-point.x), (view_point_xyzpy(1)-point.y), (view_point_xyzpy(2)-point.z));
+  double inner_product = Normal_view_pt.dot(normal_pt)/dist;
   double angle = acos(inner_product)/M_PI*180.0;
-  if(abs(angle)>m_max_angle) return false;
+  /// if angle
+  if (fabs(angle)>m_max_angle){
+    return false;
+  }
+
+  double viewpt_cam_pitch = asin(-view_point_xyzpy(4))/M_PI*180.0;
+  double viewpt_cam_yaw = asin(view_point_xyzpy(3)/cos(-view_point_xyzpy(4)))/M_PI*180.0;
+
+  Eigen::Matrix4d world_t_body = Eigen::Matrix4d::Identity();
+  Eigen::Matrix3d world_t_body_rot;
+  tf::Quaternion view_point_quat;
+  view_point_quat.setRPY(0.0, viewpt_cam_pitch, viewpt_cam_yaw);
+  tf::Matrix3x3 view_point_rotation_mat(view_point_quat);
+  tf::matrixTFToEigen(view_point_rotation_mat, world_t_body_rot);
+
+  world_t_body.block<3, 1>(0, 3) = view_point_xyzpy.block<3, 1>(0, 0);
+  world_t_body.block<3, 3>(0, 0) = world_t_body_rot;
+
+  ///// point in cam frame
+  Eigen::Vector4d world_frame_pt(point.x, point.y, point.z, 1.0);
+  Eigen::Vector4d world_frame_pt_offset = world_t_body.inverse() * world_frame_pt;
+  Eigen::Vector4d cam_frame_pt = m_body_t_cam * world_frame_pt_offset;
+
+  ///// point 3d to 2d
+  cv::Point2d uv;
+  uv.x = m_cam_intrinsic[2]*cam_frame_pt(0)/cam_frame_pt(2) + m_cam_intrinsic[4];
+  uv.y = m_cam_intrinsic[3]*cam_frame_pt(1)/cam_frame_pt(2) + m_cam_intrinsic[5];
+  uv.x = floor(fabs(uv.x)) * ((uv.x > 0) - (uv.x < 0));
+  uv.y = floor(fabs(uv.y)) * ((uv.y > 0) - (uv.y < 0));
+  /// if not in FoV
+  if (uv.x<0 || uv.x>m_cam_intrinsic[0] || uv.y<0 || uv.y>m_cam_intrinsic[1]){
+    return false;
+  }
   return true;
 }
 
-Eigen::Matrix3d ceo_mlcpp_class::RPYtoR(double roll,double pitch,double yaw)
-{
-  Eigen::Matrix3d Rmatrix;
-  Eigen::Matrix3d Rmatrix_y;
-  Eigen::Matrix3d Rmatrix_p;
-  Eigen::Matrix3d Rmatrix_r;
-  yaw = yaw*M_PI/180.0;
-  roll = roll*M_PI/180.0;
-  pitch = pitch*M_PI/180.0;
-  Rmatrix_y << cos(yaw), -sin(yaw), 0, sin(yaw), cos(yaw), 0, 0, 0, 1;
-  Rmatrix_p << cos(pitch), 0, sin(pitch), 0, 1, 0, -sin(pitch), 0, cos(pitch);
-  Rmatrix_r << 1, 0, 0, 0, cos(roll), -sin(roll), 0, sin(roll), cos(roll);
-  Rmatrix = Rmatrix_y * Rmatrix_p * Rmatrix_r;
-  return Rmatrix;
-}
 
 //TWO OPT ALGORITHM
 void ceo_mlcpp_class::TwoOptSwap(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray,int start,int finish)
@@ -595,7 +632,7 @@ double ceo_mlcpp_class::PclArrayCost(pcl::PointCloud<pcl::PointNormal>::Ptr pcla
     cost += dist;
 
     if (collision_line(Eigen::Vector3d(pclarray->points[i-1].x, pclarray->points[i-1].y, pclarray->points[i-1].z), Eigen::Vector3d(pclarray->points[i].x, pclarray->points[i].y, pclarray->points[i].z), m_collision_radius)){
-      cost = 99999.9;
+      cost += 99999.9;
     }
   }
   distance = dist;
@@ -612,7 +649,7 @@ double ceo_mlcpp_class::TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarra
   if (m_debug_mode){
     ROS_INFO("Initial cost: %.2f", best_cost);
   }
-  while (improve<300) //TODO parameterlize
+  while (improve<m_TSP_trial) //TODO parameterlize
   {
     for ( int i = 1; i <size - 2; i++ )
     {
@@ -636,46 +673,13 @@ double ceo_mlcpp_class::TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarra
   if (m_debug_mode){
     ROS_INFO("Final distance: %.2f", best_distance);
     ROS_INFO("TwoOptTSP Finished");
+    ROS_WARN("########################### Final COST: %.2f", best_cost);
   }
-  ROS_WARN("########################### Final COST: %.2f", best_cost);
   if (best_cost >= 99999){
     best_distance = -1.0;
   }
   return best_distance;
 }
-
-void ceo_mlcpp_class::OrdreringTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray)
-{
-  pcl::PointCloud<pcl::PointNormal> temp_Array;
-  pcl::PointNormal minpt;
-  pcl::PointNormal maxpt;
-  pcl::getMinMax3D(*pclarray,minpt,maxpt);
-  // cout<<minpt.z<<"<-min,max->"<<maxpt.z<<endl;
-  for(int i=0;i<pclarray->points.size();i++)
-  {
-    if(pclarray->points[i].z == minpt.z)
-    {
-      temp_Array.push_back(pclarray->points[i]);
-      // cout<<pclarray->points[i].z<<endl;
-      for(int j=0;j<pclarray->points.size();j++)
-      {
-        if(pclarray->points[j].z == maxpt.z)
-        {
-          // cout<<pclarray->points[j].z<<endl;
-          for(int k=0;k<pclarray->points.size();k++)
-          {
-            if(k!=i && k!=j) temp_Array.push_back(pclarray->points[k]);
-          }
-          temp_Array.push_back(pclarray->points[j]);
-          break;
-        }
-      }
-      break;
-    }
-  }
-  pcl::copyPointCloud(temp_Array,*pclarray);
-}
-
 
 
 void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in){
@@ -718,8 +722,8 @@ void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in){
       b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), m_max_velocity*sin(v_yaw_next), 0, 0, 0, 0;
     }
     else{      
-      b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), m_max_velocity*cos(v_yaw), 0, 0, 0, 0;
-      b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), m_max_velocity*sin(v_yaw), 0, 0, 0, 0;
+      b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), 0, 0, 0, 0, 0;
+      b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), 0, 0, 0, 0, 0;
     }
     b_z_ << curr.z, next.z, 0, 0, 0, 0, 0, 0;
     x_coeff = A_.lu().solve(b_x_);  y_coeff = A_.lu().solve(b_y_);  z_coeff = A_.lu().solve(b_z_);

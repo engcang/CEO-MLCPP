@@ -34,10 +34,7 @@ sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /u
 + Build this Repo
 ```bash
 cd ~/<your_workspace>/src
-git clone https://github.com/engcang/CEO-MLCPP.git
-
-cd CEO-MLCPP/include/ivox3d
-tar -xvf tbb2018_20170726oss_lin.tgz
+git clone --recursive https://github.com/engcang/CEO-MLCPP.git
 
 cd ~/<your_workspace>
 catkin build -DCMAKE_BUILD_TYPE=Release
@@ -57,8 +54,6 @@ rostopic pub /calculate_cpp std_msgs/Empty
 <br>
 
 ## TODO
-+ traj refinement
-+ collision in TSP (iVox)
 + Gazebo - Big Ben
 + Auto flight
 + voxblox -> real-time mesh
