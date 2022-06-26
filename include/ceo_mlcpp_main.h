@@ -68,7 +68,7 @@ using PointVectorIVox = vector<PointType, Eigen::aligned_allocator<PointType>>;
 class ceo_mlcpp_class{
   public:
     ///// basic params
-    bool m_cam_init=false, m_pcd_load=false, m_pre_process=false, m_traj_refined_check=false;
+    bool m_pcd_load=false, m_pre_process=false, m_traj_refined_check=false;
     bool m_debug_mode=false;
     string m_infile;
     vector<double> m_cam_intrinsic;
@@ -84,7 +84,6 @@ class ceo_mlcpp_class{
     double m_max_velocity = 1.0;
     double m_collision_radius = 1.0;
     ///// MLCPP variables
-    image_geometry::PinholeCameraModel m_camera_model;
     pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::Normal> m_normal_estimator;
     pcl::PointXYZ m_pcd_center_point;
     pcl::PointCloud<pcl::PointXYZ> m_cloud_map, m_cloud_center, m_cloud_none_viewed;
@@ -110,7 +109,6 @@ class ceo_mlcpp_class{
     void calc_cb(const std_msgs::Empty::ConstPtr& msg);
     void visualizer_timer_func(const ros::TimerEvent& event);
     //init
-    void cam_init();
     void load_pcd();
     void preprocess_pcd();
     //others
@@ -175,7 +173,6 @@ ceo_mlcpp_class::ceo_mlcpp_class(const ros::NodeHandle& n) : m_nh(n){
   m_visualizing_timer = m_nh.createTimer(ros::Duration(1/5.0), &ceo_mlcpp_class::visualizer_timer_func, this);
 
   //init
-  cam_init(); //Set camera parameter
   load_pcd(); //Get Map from pcd
   preprocess_pcd(); //Preprocess pcd: ground removal, normal estimation
 }
@@ -183,31 +180,6 @@ ceo_mlcpp_class::ceo_mlcpp_class(const ros::NodeHandle& n) : m_nh(n){
 
 
 ///// functions
-void ceo_mlcpp_class::cam_init(){
-  std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
-  //Set camera parameter
-  sensor_msgs::CameraInfo cam_info;
-  cam_info.width = (int)m_cam_intrinsic[0];
-  cam_info.height = (int)m_cam_intrinsic[1];
-  cam_info.distortion_model = "plumb_bob";
-  boost::array<double,9> array_K;
-  array_K[0] = m_cam_intrinsic[2];array_K[1] = 0.0;array_K[2] = m_cam_intrinsic[4];
-  array_K[3] = 0.0;array_K[4] = m_cam_intrinsic[3];array_K[5] = m_cam_intrinsic[5];
-  array_K[6] = 0;array_K[7] = 0;array_K[8] = 1.0;
-  boost::array<double,12> array_P;
-  array_P[0] = m_cam_intrinsic[2];array_P[1] = 0.0;array_P[2] = m_cam_intrinsic[4]; array_P[3] = 0.0;
-  array_P[4] = 0.0;array_P[5] = m_cam_intrinsic[3];array_P[6] = m_cam_intrinsic[5]; array_P[7] = 0.0;
-  array_P[8] = 0;array_P[9] = 0;array_P[10] = 1.0; array_P[11] = 0.0;
-  cam_info.K = array_K;
-  cam_info.P = array_P;
-  m_camera_model.fromCameraInfo(cam_info);
-
-  std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
-  double duration = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1e3;
-  ROS_WARN("Camera info processed in %.3f [ms]", duration);
-  m_cam_init = true;
-}
-
 void ceo_mlcpp_class::load_pcd(){
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
   m_cloud_map.clear();
@@ -319,7 +291,7 @@ void ceo_mlcpp_class::preprocess_pcd(){
 
 void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
-	if (m_cam_init && m_pcd_load && m_pre_process){
+	if (m_pcd_load && m_pre_process){
     m_cloud_initial_view_point.clear();
     m_cloud_none_viewed.clear();
     m_optimized_view_point.clear();
@@ -503,7 +475,7 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
 
 void ceo_mlcpp_class::visualizer_timer_func(const ros::TimerEvent& event){
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
-	if (m_cam_init && m_pcd_load && m_pre_process){
+	if (m_pcd_load && m_pre_process){
 		m_cloud_map_pub.publish(cloud2msg(m_cloud_map));
     m_cloud_center_pub.publish(cloud2msg(m_cloud_center));
     m_cloud_normal_pub.publish(m_normal_pose_array);
@@ -566,9 +538,9 @@ bool ceo_mlcpp_class::check_cam_in(Eigen::VectorXd view_point_xyzpy,pcl::PointXY
   view_pt.setIdentity();
   view_pt.block<3,3>(0,0) = RPYtoR(-90,0,-90);
   Eigen::Vector4d new_pt = view_pt.inverse() * pt_cvv;
-  cv::Point3d pt_cv(new_pt(0), new_pt(1), new_pt(2));
   cv::Point2d uv;
-  uv = m_camera_model.project3dToPixel(pt_cv);
+  uv.x = m_cam_intrinsic[2]*new_pt(0)/new_pt(2) + m_cam_intrinsic[4];
+  uv.y = m_cam_intrinsic[3]*new_pt(1)/new_pt(2) + m_cam_intrinsic[5];
   uv.x = floor(abs(uv.x)) * ((uv.x > 0) - (uv.x < 0));
   uv.y = floor(abs(uv.y)) * ((uv.y > 0) - (uv.y < 0));
   if(uv.x<0 || uv.x>m_cam_intrinsic[0] || uv.y<0 || uv.y>m_cam_intrinsic[1]) return false;
