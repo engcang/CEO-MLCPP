@@ -21,7 +21,6 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(octomap REQUIRED)
 
 if(OpenCV_FOUND)
   message(WARNING "OpenCV Found: " ${OpenCV_VERSION})
@@ -41,7 +40,6 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
-  ${OCTOMAP_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIR}
 )
 
@@ -53,17 +51,6 @@ add_library(ikdtree include/ikd-Tree/ikd_Tree.cpp)
 #### main
 add_executable(${PROJECT_NAME}_node src/main_node.cpp)
 target_link_libraries(${PROJECT_NAME}_node ${catkin_LIBRARIES} ${OpenCV_LIBS} ${EIGEN3_LIBS} ${PCL_LIBRARIES} ikdtree
-  pcl_common
-  pcl_registration
-  pcl_filters
-  pcl_sample_consensus
-  pcl_octree
-  pcl_io
-)
-
-#### generating .pcd
-add_executable(pcd_generating_node src/pcd_generating_node.cpp)
-target_link_libraries(pcd_generating_node ${catkin_LIBRARIES} ${OpenCV_LIBS} ${EIGEN3_LIBS} ${PCL_LIBRARIES} ${OCTOMAP_LIBRARIES}
   pcl_common
   pcl_registration
   pcl_filters

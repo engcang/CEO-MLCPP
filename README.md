@@ -39,6 +39,8 @@ git clone --recursive https://github.com/engcang/CEO-MLCPP.git
 
 cd CEO-MLCPP
 tar -xf GAZEBO.tar.xz
+echo "export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:$(pwd)/GAZEBO" >> ~/.bashrc
+. ~/.bashrc
 ```
 
 + Build this Repo

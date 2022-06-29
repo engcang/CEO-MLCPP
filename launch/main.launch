@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
 
-  <arg name="pcd_file_name" default="$(find ceo_mlcpp)/resource/generated_pcd.pcd"/>
+  <arg name="pcd_file_name" default="$(find ceo_mlcpp)/resource/parthenon.pcd"/>
 
   <!-- Rviz  -->
   <node name="visualizer" pkg="rviz" type="rviz" output="screen" args="-d $(find ceo_mlcpp)/rviz.rviz"/>
@@ -14,15 +14,15 @@
   <rosparam param="/cam_extrinsic">[0.1, 0.0, 0.0, 0.0]</rosparam> <!-- body to cam: translation x, y, z, downward pitch angle (rad) -->
 
   <!-- CEO-MLCPP params -->
-  <param name="/slice_height" value="5.0"/> <!-- slicing target PCL every this meters -->
-  <param name="/max_dist" value="15.0"/> <!-- between viewpoint and target pcl point -->
+  <param name="/slice_height" value="3.0"/> <!-- slicing target PCL every this meters -->
+  <param name="/max_dist" value="12.0"/> <!-- between viewpoint and target pcl point -->
   <param name="/max_angle" value="75.0"/> <!-- between viewpoint and target pcl point's normal -->
-  <param name="/view_pt_dist" value="10.0"/> <!-- from points -->
-  <param name="/view_pt_each_dist" value="2.0"/> <!-- between each viewpoints -->
-  <param name="/view_overlap" value="0.1"/> <!-- overlap bet two viewpoints -->
-  <param name="/TSP_trial" value="10"/>
+  <param name="/view_pt_dist" value="6.0"/> <!-- from points -->
+  <param name="/view_pt_each_dist" value="2.5"/> <!-- between each viewpoints -->
+  <param name="/view_overlap" value="0.5"/> <!-- overlap bet two viewpoints -->
+  <param name="/TSP_trial" value="30"/>
   <param name="/max_velocity" value="1.0"/> <!-- max velocity of UAV -->
-  <param name="/collision_radius" value="4.0"/> <!-- collision radius of UAV -->
+  <param name="/collision_radius" value="0.4"/> <!-- collision radius of UAV -->
 
   <!-- main node  -->
   <node name="ceo_mlcpp_node" pkg="ceo_mlcpp" type="ceo_mlcpp_node" output="screen"/>
