@@ -31,11 +31,18 @@ sudo apt install gcc-9 g++-9
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9
 ```
 
-+ Build this Repo
+
++ Clone this Repo with `git lfs`
 ```bash
 cd ~/<your_workspace>/src
 git clone --recursive https://github.com/engcang/CEO-MLCPP.git
 
+cd CEO-MLCPP
+tar -xf GAZEBO.tar.xz
+```
+
++ Build this Repo
+```bash
 cd ~/<your_workspace>
 catkin build -DCMAKE_BUILD_TYPE=Release
 ```
@@ -54,7 +61,6 @@ rostopic pub /calculate_cpp std_msgs/Empty
 <br>
 
 ## TODO
-+ Gazebo - Big Ben
 + Auto flight
 + voxblox -> real-time mesh
 + Rviz into two (one for path, one for voxblox)

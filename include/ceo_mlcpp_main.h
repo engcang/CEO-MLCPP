@@ -93,7 +93,6 @@ class ceo_mlcpp_class{
 
     ///// ikd-Tree
     shared_ptr<KD_TREE<PointType>> m_ikd_Tree = nullptr;
-    double m_ikdtree_delete_param, m_ikdtree_balance_param;
 
     ///// ROS
     ros::NodeHandle m_nh;
@@ -117,7 +116,7 @@ class ceo_mlcpp_class{
     double PclArrayCost(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray, double &distance);
     double TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray);
     // traj refine
-    void traj_refinement(const nav_msgs::Path &path_in);
+    void traj_refinement(const nav_msgs::Path &path_in, nav_msgs::Path &path_out);
     // collision
     bool collision_line(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2, const double &collision_radius);
 
@@ -216,7 +215,7 @@ void ceo_mlcpp_class::preprocess_pcd(){
     point.x = m_cloud_map.points[i].x;
     point.y = m_cloud_map.points[i].y;
     point.z = m_cloud_map.points[i].z;
-    if(point.z > 0.3){
+    if(point.z > 0.4){
       Eigen::Vector4d vec;
       vec<<point.x, point.y, point.z, 1;
       cloud_map_nogr->points.push_back(point);
@@ -326,7 +325,6 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
       }
       ///PCL make viewpoints by points and normals
       pcl::PointCloud<pcl::PointNormal>::Ptr viewpoint_ptnorm_temporal(new pcl::PointCloud<pcl::PointNormal>);
-      viewpoint_ptnorm_temporal->clear();
       for(int i=0;i<Sliced_target_points_normals_all->points.size();i++)
       {
         pcl::PointNormal temp_ptnorm;
@@ -343,9 +341,7 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
       ///PCL downsample viewpoints with VoxelGrid
       pcl::VoxelGrid<pcl::PointNormal> voxgrid;
       pcl::PointCloud<pcl::PointNormal>::Ptr sliced_view_points (new pcl::PointCloud<pcl::PointNormal>);
-      sliced_view_points->clear();
       pcl::PointCloud<pcl::PointNormal>::Ptr Sliced_admitted_view_points (new pcl::PointCloud<pcl::PointNormal>);
-      Sliced_admitted_view_points->clear();
       voxgrid.setInputCloud(viewpoint_ptnorm_temporal);
       voxgrid.setLeafSize(m_view_pt_each_dist,m_view_pt_each_dist,m_view_pt_each_dist);
       voxgrid.filter(*sliced_view_points);
@@ -361,7 +357,6 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
       }
 
       pcl::PointCloud<pcl::PointNormal>::Ptr Sliced_target_points_normals_nonviewed (new pcl::PointCloud<pcl::PointNormal>);
-      Sliced_target_points_normals_nonviewed->clear();
       pcl::copyPointCloud(*Sliced_target_points_normals_all,*Sliced_target_points_normals_nonviewed);
       ///PCL downsample viewpoints by view calculation
       int admitted=0;
@@ -429,6 +424,10 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
         ROS_INFO("collision, doing this layer again");
         continue; // collision, do this slice again
       }
+      if (Sliced_admitted_view_points->points.size() < 1){
+        ROS_INFO("No admitted points, doing this layer again");
+        continue; // collision, do this slice again
+      }
       if (current_layer > 1){
         Eigen::Vector3d last_layer_end_point(m_all_layer_path.poses.back().pose.position.x, m_all_layer_path.poses.back().pose.position.y, m_all_layer_path.poses.back().pose.position.z);
         Eigen::Vector3d current_first_point(Sliced_admitted_view_points->points[0].x, Sliced_admitted_view_points->points[0].y, Sliced_admitted_view_points->points[0].z);
@@ -489,7 +488,8 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
     } //while end
 
     //// traj refinement
-    traj_refinement(m_all_layer_path);
+    traj_refinement(m_all_layer_path, m_all_layer_refined_path);
+    m_traj_refined_check=true;
 
 	} //if end
 	else{
@@ -564,9 +564,9 @@ bool ceo_mlcpp_class::check_cam_in(Eigen::VectorXd view_point_xyzpy,pcl::PointXY
 {
   /// if too far
   float dist = sqrt(pow((view_point_xyzpy(0)-point.x),2)+pow((view_point_xyzpy(1)-point.y),2)+pow((view_point_xyzpy(2)-point.z),2));
-  if (dist > m_max_dist){
-    return false;
-  }
+  // if (dist > m_max_dist){
+    // return false;
+  // }
 
   Eigen::Vector3d normal_pt(normal.normal_x,normal.normal_y,normal.normal_z);
   Eigen::Vector3d Normal_view_pt((view_point_xyzpy(0)-point.x), (view_point_xyzpy(1)-point.y), (view_point_xyzpy(2)-point.z));
@@ -642,6 +642,7 @@ double ceo_mlcpp_class::PclArrayCost(pcl::PointCloud<pcl::PointNormal>::Ptr pcla
 double ceo_mlcpp_class::TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray)
 {
   pcl::PointCloud<pcl::PointNormal> temp_Array;
+  pcl::copyPointCloud(*pclarray,temp_Array);
   int size = pclarray->points.size();
   int improve = 0;
   double best_distance, best_cost;
@@ -649,7 +650,7 @@ double ceo_mlcpp_class::TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarra
   if (m_debug_mode){
     ROS_INFO("Initial cost: %.2f", best_cost);
   }
-  while (improve<m_TSP_trial) //TODO parameterlize
+  while (improve<m_TSP_trial)
   {
     for ( int i = 1; i <size - 2; i++ )
     {
@@ -682,10 +683,10 @@ double ceo_mlcpp_class::TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarra
 }
 
 
-void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in){
-  m_all_layer_refined_path.header.stamp = ros::Time::now();
-  m_all_layer_refined_path.header.frame_id = "map";
-  m_all_layer_refined_path.poses.clear();
+void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in, nav_msgs::Path &path_out){
+  path_out.header.stamp = ros::Time::now();
+  path_out.header.frame_id = "map";
+  path_out.poses.clear();
 
   Eigen::MatrixXd A_ = Eigen::MatrixXd::Zero(8,8);
   for (int i = 0; i < path_in.poses.size()-1; ++i)
@@ -718,8 +719,8 @@ void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in){
     if (i < path_in.poses.size()-2){
       geometry_msgs::Point next_next = path_in.poses[i+2].pose.position;
       double v_yaw_next = atan2(next_next.y-next.y, next_next.x-next.x);
-      b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), m_max_velocity*cos(v_yaw_next), 0, 0, 0, 0;
-      b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), m_max_velocity*sin(v_yaw_next), 0, 0, 0, 0;
+      b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), m_max_velocity*cos(v_yaw), 0, 0, 0, 0;
+      b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), m_max_velocity*sin(v_yaw), 0, 0, 0, 0;
     }
     else{      
       b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), 0, 0, 0, 0, 0;
@@ -743,10 +744,9 @@ void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in){
       p.pose.orientation.y = qqq.getY();
       p.pose.orientation.z = qqq.getZ();
       p.pose.orientation.w = qqq.getW();
-      m_all_layer_refined_path.poses.push_back(p);
+      path_out.poses.push_back(p);
     }
   }
-  m_traj_refined_check=true;
 }
 
 
