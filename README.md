@@ -46,11 +46,6 @@ sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /u
 ```bash
 cd ~/<your_workspace>/src
 git clone --recursive https://github.com/engcang/CEO-MLCPP.git
-
-cd CEO-MLCPP
-tar -xf GAZEBO.tar.xz
-echo "export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:$(pwd)/GAZEBO" >> ~/.bashrc
-. ~/.bashrc
 ```
 
 + Build this Repo
@@ -71,6 +66,22 @@ rostopic pub /calculate_cpp std_msgs/Empty
   + Just ignore it. It will disappear after `rostopic pub /calculate_cpp std_msgs/Empty`
 
 <br>
+
+
+## How to do real-time 3D reconstruction with the generated path in Gazebo
++ Install `PX4-SITL`
++ Install `Voxblox`
++ Setup `Gazebo` env
+```bash
+cd CEO-MLCPP
+echo "export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:$(pwd)/GAZEBO" >> ~/.bashrc
+. ~/.bashrc
+```
++ Build flight codes
+```bash
+cd ~/<your_workspace>
+catkin build -DCMAKE_BUILD_TYPE=Release -DCEO_MLCPP_FLIGHT=true
+```
 
 ## TODO
 + Auto flight
