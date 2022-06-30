@@ -14,6 +14,16 @@
   <em>Original MLCPP. (left): Target and path. (center): full visualization. (right): collisions of path</em>
 </p>
 
+#### CEO-MLCPP
++ TSP considering collision and smooth, control-efficient paths
+<p align="center">
+  <img src="resource/ceomlcpp2.png" height="300"/>
+  <img src="resource/ceomlcpp.png" height="300"/>
+  <img src="resource/ceomlcpp3.png" height="300"/>
+  <br>
+  <em>CEO-MLCPP. (left): Target and path. (center): full visualization. (right): path without collision</em>
+</p>
+
 
 <br>
 

@@ -22,7 +22,7 @@
   <param name="/view_overlap" value="0.4"/> <!-- overlap bet two viewpoints -->
   <param name="/TSP_trial" value="200"/>
   <param name="/max_velocity" value="1.0"/> <!-- max velocity of UAV -->
-  <param name="/collision_radius" value="3.0"/> <!-- collision radius of UAV -->
+  <param name="/collision_radius" value="4.0"/> <!-- collision radius of UAV -->
 
   <!-- main node  -->
   <node name="ceo_mlcpp_node" pkg="ceo_mlcpp" type="ceo_mlcpp_node" output="screen"/>
