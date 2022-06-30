@@ -6,6 +6,7 @@
 #include "ikd_Tree.h"
 
 ///// C++
+#include <random>
 #include <algorithm>
 #include <signal.h>
 #include <string>
@@ -84,7 +85,8 @@ class ceo_mlcpp_class{
     double m_collision_radius = 1.0;
     ///// MLCPP variables
     pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::Normal> m_normal_estimator;
-    pcl::PointCloud<pcl::PointXYZ> m_cloud_map, m_cloud_none_viewed;
+    pcl::PointXYZ m_pcd_center_point;
+    pcl::PointCloud<pcl::PointXYZ> m_cloud_map, m_cloud_center, m_cloud_none_viewed;
     pcl::PointCloud<pcl::PointXYZ> m_cloud_initial_view_point, m_optimized_view_point;
     pcl::PointCloud<pcl::PointNormal> m_cloud_normals;
     geometry_msgs::PoseArray m_normal_pose_array;
@@ -96,7 +98,7 @@ class ceo_mlcpp_class{
     ///// ROS
     ros::NodeHandle m_nh;
     ros::Subscriber m_path_calc_sub;
-    ros::Publisher m_cloud_map_pub, m_cloud_none_viewed_pub;
+    ros::Publisher m_cloud_map_pub, m_cloud_center_pub, m_cloud_none_viewed_pub;
     ros::Publisher m_initial_view_point_pub, m_optimized_view_point_pub;
     ros::Publisher m_cloud_normal_pub, m_all_layer_path_pub, m_all_layer_path_refined_pub;
     ros::Timer m_visualizing_timer;
@@ -110,6 +112,7 @@ class ceo_mlcpp_class{
     void preprocess_pcd();
     // funcs
     bool check_cam_in(Eigen::VectorXd view_point_xyzpy,pcl::PointXYZ point,pcl::Normal normal);
+    void flip_normal(pcl::PointXYZ base,pcl::PointXYZ center,float & nx,float & ny, float & nz);
     void TwoOptSwap(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray, int start, int finish);
     double PclArrayCost(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray, double &distance);
     double TwoOptTSP(pcl::PointCloud<pcl::PointNormal>::Ptr pclarray);
@@ -157,6 +160,7 @@ ceo_mlcpp_class::ceo_mlcpp_class(const ros::NodeHandle& n) : m_nh(n){
 
   //pub
   m_cloud_map_pub = m_nh.advertise<sensor_msgs::PointCloud2>("/pcl_map", 3);
+  m_cloud_center_pub = m_nh.advertise<sensor_msgs::PointCloud2>("/pcl_center", 3);
   m_cloud_none_viewed_pub = m_nh.advertise<sensor_msgs::PointCloud2>("/none_viewed_pcl", 3);
   m_initial_view_point_pub = m_nh.advertise<sensor_msgs::PointCloud2>("/initial_viewpoints", 3);
   m_optimized_view_point_pub = m_nh.advertise<sensor_msgs::PointCloud2>("/optimized_viewpoints", 3);
@@ -181,13 +185,14 @@ ceo_mlcpp_class::ceo_mlcpp_class(const ros::NodeHandle& n) : m_nh(n){
 void ceo_mlcpp_class::load_pcd(){
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
   m_cloud_map.clear();
+  m_cloud_center.clear();
   m_cloud_normals.clear();
   m_cloud_none_viewed.clear();
   m_cloud_initial_view_point.clear();
   m_optimized_view_point.clear();
 
   ROS_INFO("loading %s", m_infile.c_str());
-  if (pcl::io::loadPCDFile<pcl::PointNormal> (m_infile.c_str (), m_cloud_normals) == -1) //* load the file
+  if (pcl::io::loadPCDFile<pcl::PointXYZ> (m_infile.c_str (), m_cloud_map) == -1) //* load the file
   {
     PCL_ERROR ("Couldn't read pcd file \n");
     return;
@@ -203,20 +208,71 @@ void ceo_mlcpp_class::load_pcd(){
 
 void ceo_mlcpp_class::preprocess_pcd(){
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+
   ////// Ground Eleminate
-  m_cloud_map.clear();
-  for(size_t i = 0; i < m_cloud_normals.points.size() ; ++i){
+  ROS_INFO("Ground filtering Start!");
+  m_pcd_center_point.x = 0; m_pcd_center_point.y = 0; m_pcd_center_point.z = 0;
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_map_nogr(new pcl::PointCloud<pcl::PointXYZ>);
+  for(size_t i = 0; i < m_cloud_map.points.size() ; ++i){
     pcl::PointXYZ point;
-    point.x = m_cloud_normals.points[i].x;
-    point.y = m_cloud_normals.points[i].y;
-    point.z = m_cloud_normals.points[i].z;
-    m_cloud_map.push_back(point);
+    point.x = m_cloud_map.points[i].x;
+    point.y = m_cloud_map.points[i].y;
+    point.z = m_cloud_map.points[i].z;
+    if(point.z > 0.4){
+      Eigen::Vector4d vec;
+      vec<<point.x, point.y, point.z, 1;
+      cloud_map_nogr->points.push_back(point);
+      m_pcd_center_point.x += point.x;
+      m_pcd_center_point.y += point.y;
+      m_pcd_center_point.z += point.z;
+    }
   }
+  m_pcd_center_point.x = m_pcd_center_point.x / cloud_map_nogr->points.size();
+  m_pcd_center_point.y = m_pcd_center_point.y / cloud_map_nogr->points.size();
+  m_pcd_center_point.z = m_pcd_center_point.z / cloud_map_nogr->points.size();
+  m_cloud_center.push_back(m_pcd_center_point);
+
+  m_cloud_map.clear();
+  m_cloud_map = *cloud_map_nogr;
   m_cloud_map.width = m_cloud_map.points.size();
   m_cloud_map.height = 1;
+  ROS_INFO("Ground filtering Finished!");
+
+
+
+  ////// Normal estimation
+  ROS_INFO("Normal Estimation Start!");
+  m_cloud_normals.clear();
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in(new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
+  pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ> ());
+  *cloud_in = m_cloud_map;
+  m_normal_estimator.setInputCloud(cloud_in);
+  m_normal_estimator.setSearchMethod (tree);
+  // m_normal_estimator.setKSearch (m_pcd_normal_search);
+  m_normal_estimator.setRadiusSearch (4.0); //TODO, parameterlize
+  m_normal_estimator.compute (*cloud_normals);
+  for (size_t i=0; i<cloud_normals->points.size(); ++i)
+  {
+    flip_normal(cloud_in->points[i], m_pcd_center_point, cloud_normals->points[i].normal[0], cloud_normals->points[i].normal[1], cloud_normals->points[i].normal[2]);
+    pcl::PointNormal temp_ptnorm;
+    temp_ptnorm.x = cloud_in->points[i].x;
+    temp_ptnorm.y = cloud_in->points[i].y;
+    temp_ptnorm.z = cloud_in->points[i].z;
+    temp_ptnorm.normal[0] = cloud_normals->points[i].normal[0];
+    temp_ptnorm.normal[1] = cloud_normals->points[i].normal[1];
+    temp_ptnorm.normal[2] = cloud_normals->points[i].normal[2];
+    m_cloud_normals.push_back(temp_ptnorm);
+  }
+  m_cloud_normals.width = m_cloud_normals.points.size();
+  m_cloud_normals.height = 1;
+  ROS_INFO("Normal Estimation Finish!");
+  ROS_INFO("Cloud size : %lu",cloud_in->points.size());
+  ROS_INFO("Cloud Normal size : %lu",cloud_normals->points.size());
 
   m_normal_pose_array = pclnormal_to_posearray(m_cloud_normals);
   m_normal_pose_array.header.frame_id = "map";
+
 
   ///// ikd-Tree for collision
   PointVectorIKdTree pcl_input_map_point_vector_ikd;
@@ -246,6 +302,8 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
     m_all_layer_path.header.frame_id = "map";
     m_all_layer_path.poses.clear();
     m_traj_refined_check=false;
+    std::random_device rd_;
+    std::mt19937 random_func(rd_());
     
     ////// calculate Coverage Path
     ///Make Initial viewpoint
@@ -311,7 +369,7 @@ void ceo_mlcpp_class::calc_cb(const std_msgs::Empty::ConstPtr& msg){
       for(int i=0;i<sliced_view_points->points.size();i++){
         a[i]=i;
       }
-      random_shuffle(&a[0], &a[sliced_view_points->points.size()]);
+      shuffle(&a[0], &a[sliced_view_points->points.size()], random_func);
       for(int k=0;k<sliced_view_points->points.size();k++)
       {
         int i = a[k];
@@ -452,6 +510,7 @@ void ceo_mlcpp_class::visualizer_timer_func(const ros::TimerEvent& event){
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 	if (m_pcd_load && m_pre_process){
     m_cloud_map_pub.publish(cloud2msg(m_cloud_map));
+    m_cloud_center_pub.publish(cloud2msg(m_cloud_center));
     m_cloud_normal_pub.publish(m_normal_pose_array);
     m_initial_view_point_pub.publish(cloud2msg(m_cloud_initial_view_point));
     m_cloud_none_viewed_pub.publish(cloud2msg(m_cloud_none_viewed));
@@ -474,6 +533,19 @@ void ceo_mlcpp_class::visualizer_timer_func(const ros::TimerEvent& event){
 
 
 ///////// methods
+//TODO: flip_normal not from center but from real view point, where recorded PCL for none-convex targets
+void ceo_mlcpp_class::flip_normal(pcl::PointXYZ base, pcl::PointXYZ center, float & nx, float & ny, float & nz)
+{
+  float xdif = base.x - center.x;
+  float ydif = base.y - center.y;
+  if(xdif * nx + ydif * ny <0)
+  {
+    nx = -nx;
+    ny = -ny;
+    nz = -nz;
+  }
+}
+
 bool ceo_mlcpp_class::collision_line(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2, const double &collision_radius){
   Eigen::Vector3d direction = (p2 - p1).normalized();
   double length = (p2 - p1).norm();
@@ -498,9 +570,9 @@ bool ceo_mlcpp_class::check_cam_in(Eigen::VectorXd view_point_xyzpy,pcl::PointXY
 {
   /// if too far
   float dist = sqrt(pow((view_point_xyzpy(0)-point.x),2)+pow((view_point_xyzpy(1)-point.y),2)+pow((view_point_xyzpy(2)-point.z),2));
-  // if (dist > m_max_dist){
-    // return false;
-  // }
+  if (dist > m_max_dist){
+    return false;
+  }
 
   Eigen::Vector3d normal_pt(normal.normal_x,normal.normal_y,normal.normal_z);
   Eigen::Vector3d Normal_view_pt((view_point_xyzpy(0)-point.x), (view_point_xyzpy(1)-point.y), (view_point_xyzpy(2)-point.z));
@@ -653,8 +725,8 @@ void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in, nav_msgs::P
     if (i < path_in.poses.size()-2){
       geometry_msgs::Point next_next = path_in.poses[i+2].pose.position;
       double v_yaw_next = atan2(next_next.y-next.y, next_next.x-next.x);
-      b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), m_max_velocity*cos(v_yaw), 0, 0, 0, 0;
-      b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), m_max_velocity*sin(v_yaw), 0, 0, 0, 0;
+      b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), m_max_velocity*cos(v_yaw_next), 0, 0, 0, 0;
+      b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), m_max_velocity*sin(v_yaw_next), 0, 0, 0, 0;
     }
     else{      
       b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), 0, 0, 0, 0, 0;

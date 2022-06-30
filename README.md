@@ -66,5 +66,3 @@ rostopic pub /calculate_cpp std_msgs/Empty
 + Auto flight
 + voxblox -> real-time mesh
 + Rviz into two (one for path, one for voxblox)
-+ flip-normal fix
-+ Throttle evaluation
