@@ -58,3 +58,46 @@ target_link_libraries(${PROJECT_NAME}_node ${catkin_LIBRARIES} ${OpenCV_LIBS} ${
   pcl_octree
   pcl_io
 )
+
+
+#### build flight code
+if(CEO_MLCPP_FLIGHT)
+
+  find_package(catkin REQUIRED COMPONENTS
+    roscpp
+    roslib
+    tf
+    std_msgs
+    sensor_msgs
+    geometry_msgs
+    nav_msgs
+    pcl_ros
+    pcl_conversions
+    cv_bridge
+    voxblox
+    voxblox_msgs
+    voxblox_ros
+    minkindr_conversions
+  )
+
+  find_package(PCL REQUIRED)
+  find_package(OpenCV REQUIRED)
+  find_package(Eigen3 REQUIRED)
+
+  message(WARNING "Building flight codes")
+  
+  catkin_package()
+
+  include_directories(
+    include
+    include/voxblox
+    ${catkin_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+    ${EIGEN3_INCLUDE_DIR}
+  )
+
+  add_executable(${PROJECT_NAME}_flight_node src/flight_main.cpp)
+  target_link_libraries(${PROJECT_NAME}_flight_node ${catkin_LIBRARIES} ${EIGEN3_LIBS} ${OpenCV_LIBS})
+
+endif()

@@ -18,11 +18,20 @@
 ///// Eigen, Linear Algebra
 #include <Eigen/Eigen> //whole Eigen library
 
+///// OpenCV
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
+
 using namespace std;
 using namespace Eigen;
 
 
 ////////////////////////// utils
+////////// basic
+double euclidean_dist(const geometry_msgs::Pose &pos1, const Eigen::Vector3d &pos2){
+  return sqrt(pow(pos1.position.x-pos2(0),2) + pow(pos1.position.y-pos2(1),2) + pow(pos1.position.z-pos2(2),2));
+}
+
 ////////// PCL
 template <typename T>
 sensor_msgs::PointCloud2 cloud2msg(const pcl::PointCloud<T> &cloud, string frame_id = "map")
@@ -38,7 +47,29 @@ pcl::PointCloud<pcl::PointXYZ> cloudmsg2cloud(const sensor_msgs::PointCloud2 &cl
   pcl::fromROSMsg(cloudmsg,cloudresult);
   return cloudresult;
 }
-
+void depth_img_to_pcl(const cv::Mat &depth_img, const cv::Mat &rgb_img, const double &scale_factor, const vector<double> &cam_intrinsic, pcl::PointCloud<pcl::PointXYZRGB> &cam_cvt_pcl){
+  for (int i=0; i<depth_img.rows; i++){
+    for (int j=0; j<depth_img.cols; j++){
+      float temp_depth;
+      if (scale_factor==1.0){
+        temp_depth = depth_img.at<float>(i,j);
+      }
+      else if(scale_factor==1000.0){
+        temp_depth = depth_img.at<ushort>(i,j);
+      }
+      pcl::PointXYZRGB p3d;
+      if (!std::isnan(temp_depth)){
+        p3d.z = temp_depth/scale_factor; 
+        p3d.x = ( j - cam_intrinsic[4] ) * p3d.z / cam_intrinsic[2];
+        p3d.y = ( i - cam_intrinsic[5] ) * p3d.z / cam_intrinsic[3];
+        p3d.r = rgb_img.at<cv::Vec3b>(i,j)[2];
+        p3d.g = rgb_img.at<cv::Vec3b>(i,j)[1];
+        p3d.b = rgb_img.at<cv::Vec3b>(i,j)[0];
+        cam_cvt_pcl.push_back(p3d);
+      }
+    }
+  }
+}
 
 ///////// Transform
 Quaterniond normal_vector_to_quaternion_double(const double &normal_x, const double &normal_y, const double &normal_z){

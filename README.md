@@ -28,30 +28,16 @@
 <br>
 
 ## How to install
-+ Install requirements
-```bash
-sudo apt install libgoogle-glog-dev libeigen3-dev
-```
-+ Install `gcc-9` and `g++-9`
-```bash
-sudo apt-get install libgoogle-glog-dev
-sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-sudo apt update
-sudo apt install gcc-9 g++-9
-sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9
-```
++ Install requirements: `ROS`, `Eigen`, `PCL`, `OpenCV`
 
-
-+ Clone this Repo with `git lfs`
++ Clone and built this repo
 ```bash
 cd ~/<your_workspace>/src
 git clone --recursive https://github.com/engcang/CEO-MLCPP.git
-```
 
-+ Build this Repo
-```bash
 cd ~/<your_workspace>
 catkin build -DCMAKE_BUILD_TYPE=Release
+. devel/setup.bash
 ```
 
 <br>
@@ -67,23 +53,37 @@ rostopic pub /calculate_cpp std_msgs/Empty
 
 <br>
 
+---
 
 ## How to do real-time 3D reconstruction with the generated path in Gazebo
 + Install `PX4-SITL`
 + Install `Voxblox`
 + Setup `Gazebo` env
+
 ```bash
 cd CEO-MLCPP
 echo "export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:$(pwd)/GAZEBO" >> ~/.bashrc
 . ~/.bashrc
 ```
+
 + Build flight codes
 ```bash
 cd ~/<your_workspace>
-catkin build -DCMAKE_BUILD_TYPE=Release -DCEO_MLCPP_FLIGHT=true
+catkin build -DCMAKE_BUILD_TYPE=Release -DCEO_MLCPP_FLIGHT=True
+. devel/setup.bash
 ```
 
-## TODO
-+ Auto flight
-+ voxblox -> real-time mesh
-+ Rviz into two (one for path, one for voxblox)
++ Run
+```bash
+roslaunch ceo_mlcpp gazebo.launch
+roslaunch ceo_mlcpp main.launch flight_with_gazebo:=true
+rostopic pub /calculate_cpp std_msgs/Empty
+```
+
+### 3D reconstruction result
++ with `Voxblox`
+<p align="center">
+  <img src="resource/ceo-recon.png" height="500"/>
+</p>
+
++ with `pix4D`

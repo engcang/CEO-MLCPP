@@ -4,14 +4,14 @@
    <pose>0 0 0 0 0 0</pose>
    <static>true</static>
    <link name="link">
-     <collision name="collision">
+     <!-- <collision name="collision">
        <geometry>
          <mesh>
            <scale>0.35 0.35 0.35</scale>
            <uri>model://japanese_temple2/materials/untitled.dae</uri>
          </mesh>
        </geometry>
-     </collision>
+     </collision> -->
      <visual name="visual">
      <cast_shadows>0</cast_shadows>
        <geometry>

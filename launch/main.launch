@@ -1,7 +1,9 @@
 <?xml version="1.0"?>
 <launch>
 
-  <arg name="pcd_file_name" default="$(find ceo_mlcpp)/resource/bigben1.pcd"/>
+  <arg name="flight_with_gazebo" default="false"/>
+  <arg name="pcd_file_name" default="$(find ceo_mlcpp)/resource/bigben2.pcd"/> <!-- bigben1, bigben2, temple2-->
+                                                          <!-- only bigben2 can be used for flight in Gazebo -->
 
   <!-- Rviz  -->
   <node name="visualizer" pkg="rviz" type="rviz" output="screen" args="-d $(find ceo_mlcpp)/rviz.rviz"/>
@@ -11,7 +13,7 @@
   <param name="/debug_mode" value="false"/>
   <param name="/infile" value="$(arg pcd_file_name)"/>
   <rosparam param="/cam_intrinsic">[640, 480, 319.998, 319.998, 320.5, 240.5]</rosparam> <!-- width, height, f_x, f_y, c_x, c_y -->
-  <rosparam param="/cam_extrinsic">[0.1, 0.0, 0.0, 0.0]</rosparam> <!-- body to cam: translation x, y, z, downward pitch angle (rad) -->
+  <rosparam param="/cam_extrinsic">[0.15, 0.0, 0.25, 0.0]</rosparam> <!-- body to cam: translation x, y, z, downward pitch angle (rad) -->
 
   <!-- CEO-MLCPP params -->
   <param name="/slice_height" value="7.0"/> <!-- slicing target PCL every this meters -->
@@ -28,5 +30,17 @@
   <node name="ceo_mlcpp_node" pkg="ceo_mlcpp" type="ceo_mlcpp_node" output="screen"/>
   <!-- launch-prefix="gdb -ex run --> <!--args" -->
 
+  <!-- flight node  -->
+  <group if="$(arg flight_with_gazebo)">
+    <node name="ceo_mlcpp_flight_node" pkg="ceo_mlcpp" type="ceo_mlcpp_flight_node" output="screen">
+      <param name="tsdf_voxels_per_side" value="8"/>
+      <param name="voxel_resolution" value="0.4"/>
+      <param name="max_ray_length_m" value="20.0"/>
+      <param name="method" value="fast"/> <!-- simple, fast, merged -->
+      <param name="color_mode" value="color"/>
+    </node>
+    <node name="visualizer2" pkg="rviz" type="rviz" output="screen" args="-d $(find ceo_mlcpp)/flight_rviz.rviz"/>
+    <node name="visualizer3" pkg="ceo_mlcpp" type="pose_to_path.py"/>    
+  </group>
 
 </launch>

@@ -4,14 +4,14 @@
    <pose>0 0 0 0 0 0</pose>
    <static>true</static>
    <link name="link">
-     <collision name="collision">
+     <!-- <collision name="collision">
        <geometry>
          <mesh>
            <scale>0.8 0.8 0.8</scale>
            <uri>model://bigben2/model.dae</uri>
          </mesh>
        </geometry>
-     </collision>
+     </collision> -->
      <visual name="visual">
      <cast_shadows>0</cast_shadows>
        <geometry>

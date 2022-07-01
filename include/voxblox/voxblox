@@ -1,0 +1,37 @@
+///////////// What I needed from original tsdf_server, esdf_server
+tsdf update
+tsdf -> mesh update
+tsdf -> esdf update
+
+visualizing:
+  tsdf occupied pcl / or (surface pcl)
+  tsdf mesh
+  esdf (height) pcl
+
+//////////////// How TSDF works in tsdf_server code
+pointcloud_sub_ -> insertPointcloud 
+                    -> getNextPointcloudFromQueue (lookupTransform)->
+                        Transformation* transform
+                        // where transformation is defined in minkindr_ros as follows:
+                              typedef float FloatingPoint; Scalar = FloatingPoint
+                              kindr::minimal::QuatTransformationTemplate<Scalar>* kindr
+                              Eigen::Matrix<Scalar, 3, 1> position;
+                              Eigen::Quaternion<Scalar> rotation;
+                              *kindr = kindr::minimal::QuatTransformationTemplate<Scalar>(rotation, position);
+
+                 -> processPointCloudMessageAndInsert (pcl, transform)
+                        -> integratePointcloud(transform, pointsC, colors)
+
+
+/////////////// How ESDF works in tsdf_server code
+updateEsdf() -> updateFromTsdfLayer()
+
+
+///////////////////// additional funcs
+tsdf_map_->getTsdfLayer().getNumberOfAllocatedBlocks()
+tsdf_map_->getTsdfLayer().getMemorySize()
+esdf_map_->getEsdfLayerPtr()->getNumberOfAllocatedBlocks()
+
+
+/////////////// How TsdfEsdf is modified to work
+insertpointcloud -> updateMesh(), updateEsdf() -> publishPointclouds, publishmesh, publishESDFslice
