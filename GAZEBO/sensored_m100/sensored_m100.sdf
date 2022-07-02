@@ -8,11 +8,11 @@
 
 
     <include>
-      <uri>model://d435i</uri>
+      <uri>model://d435i_ceo</uri>
       <pose>0.15 0.0 0.25 0 0 0</pose>
     </include>
     <joint name="cam_joint" type="fixed">
-      <child>d435i::camera_link</child>
+      <child>d435i_ceo::camera_link</child>
       <parent>m100::fuselage</parent>
       <axis>
         <xyz>0 0 1</xyz>

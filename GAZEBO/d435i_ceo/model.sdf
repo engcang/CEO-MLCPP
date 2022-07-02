@@ -1,6 +1,6 @@
 <?xml version="1.0" ?>
 <sdf version="1.5">
-  <model name="d435i">
+  <model name="d435i_ceo">
     <pose>0 0 0 0 0 0</pose>
     <link name="camera_link">
       <inertial>
