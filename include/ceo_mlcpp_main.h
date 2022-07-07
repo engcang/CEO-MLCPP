@@ -727,10 +727,14 @@ void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in, nav_msgs::P
       double v_yaw_next = atan2(next_next.y-next.y, next_next.x-next.x);
       b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), m_max_velocity*cos(v_yaw_next), 0, 0, 0, 0;
       b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), m_max_velocity*sin(v_yaw_next), 0, 0, 0, 0;
+      // b_x_ << curr.x, next.x, 0, 0, 0, 0, 0, 0;
+      // b_y_ << curr.y, next.y, 0, 0, 0, 0, 0, 0;
     }
     else{      
       b_x_ << curr.x, next.x, m_max_velocity*cos(v_yaw), 0, 0, 0, 0, 0;
       b_y_ << curr.y, next.y, m_max_velocity*sin(v_yaw), 0, 0, 0, 0, 0;
+      // b_x_ << curr.x, next.x, 0, 0, 0, 0, 0, 0;
+      // b_y_ << curr.y, next.y, 0, 0, 0, 0, 0, 0;
     }
     b_z_ << curr.z, next.z, 0, 0, 0, 0, 0, 0;
     x_coeff = A_.lu().solve(b_x_);  y_coeff = A_.lu().solve(b_y_);  z_coeff = A_.lu().solve(b_z_);
@@ -742,9 +746,10 @@ void ceo_mlcpp_class::traj_refinement(const nav_msgs::Path &path_in, nav_msgs::P
       p.pose.position.y = y_coeff[0]*pow(t,7) + y_coeff[1]*pow(t,6) + y_coeff[2]*pow(t,5) + y_coeff[3]*pow(t,4) + y_coeff[4]*pow(t,3) + y_coeff[5]*pow(t,2) + y_coeff[6]*t + y_coeff[7];
       p.pose.position.z = z_coeff[0]*pow(t,7) + z_coeff[1]*pow(t,6) + z_coeff[2]*pow(t,5) + z_coeff[3]*pow(t,4) + z_coeff[4]*pow(t,3) + z_coeff[5]*pow(t,2) + z_coeff[6]*t + z_coeff[7];
 
-      double g_yaw = curr_yaw + (next_yaw-curr_yaw) * t/T_;
+      // double g_yaw = curr_yaw + (next_yaw-curr_yaw) * t/T_;
       tf::Quaternion qqq;
-      qqq.setRPY(0,0, g_yaw); //roll=pitch=0 !!!
+      // qqq.setRPY(0,0, g_yaw); //roll=pitch=0 !!!
+      qqq.setRPY(_a, _b, next_yaw); //roll=pitch=0 !!!
 
       p.pose.orientation.x = qqq.getX();
       p.pose.orientation.y = qqq.getY();

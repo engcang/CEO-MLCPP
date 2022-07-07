@@ -17,7 +17,7 @@
 
   <!-- CEO-MLCPP params -->
   <param name="/slice_height" value="7.0"/> <!-- slicing target PCL every this meters -->
-  <param name="/max_dist" value="16.0"/> <!-- between viewpoint and target pcl point -->
+  <param name="/max_dist" value="18.0"/> <!-- between viewpoint and target pcl point -->
   <param name="/max_angle" value="75.0"/> <!-- between viewpoint and target pcl point's normal -->
   <param name="/view_pt_dist" value="10.0"/> <!-- from points -->
   <param name="/view_pt_each_dist" value="2.0"/> <!-- between each viewpoints -->
