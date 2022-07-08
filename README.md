@@ -85,5 +85,3 @@ rostopic pub /calculate_cpp std_msgs/Empty
 <p align="center">
   <img src="resource/ceo-recon.png" height="500"/>
 </p>
-
-+ with `pix4D`
